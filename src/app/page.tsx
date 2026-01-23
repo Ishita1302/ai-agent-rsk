@@ -23,16 +23,22 @@ import { BLOCK_EXPLORER_URL } from "@/lib/contants";
 
 export default function Home() {
   const [messages, setMessages] = useState<
-    { role: string; content: React.ReactNode }[]
+    { role: string; content: React.ReactNode; text?: string }[]
   >([
     {
       role: "agent",
       content:
         "Hello! I can help you interact with the Rootstock testnet. What would you like to do?",
+      text: "Hello! I can help you interact with the Rootstock testnet. What would you like to do?",
     },
   ]);
 
   const { address, isConnected } = useAppKitAccount();
+  
+  useEffect(() => {
+    console.log("Wallet Status:", { address, isConnected });
+  }, [address, isConnected]);
+
   const config = useConfig();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -74,7 +80,7 @@ export default function Home() {
     }
   };
 
-  const handleBalance = async (data: any) => {
+  const handleBalance = async (data: { token1: string; address?: string }) => {
     try {
       const tokenAdd =
         data.token1.toLowerCase() === "trbtc"
@@ -85,13 +91,17 @@ export default function Home() {
         throw new Error("Token not found");
       }
 
-      const acc = isAddress(data.address) ? data.address : address;
+      const acc = data.address && isAddress(data.address) ? data.address : address;
+
+      if (!acc) {
+        throw new Error("No wallet address provided or connected");
+      }
 
       let balance;
 
       if (tokenAdd === "trbtc") {
         const queryBalance = await getBalance(config, {
-          address: acc,
+          address: acc as `0x${string}`,
         });
 
         balance = {
@@ -103,7 +113,7 @@ export default function Home() {
           abi: erc20Abi,
           address: checksumAddress(tokenAdd as `0x${string}`) as `0x${string}`,
           functionName: "balanceOf",
-          args: [acc],
+          args: [acc as `0x${string}`],
         });
         balance = {
           displayValue: Number(queryBalance) / 10e18,
@@ -122,13 +132,14 @@ export default function Home() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    const userMessage = { role: "user", content: input };
+    const userMessage = { role: "user", content: input, text: input };
     setInput("");
     setIsLoading(true);
 
     const processingMessage = {
       role: "bot" as const,
       content: "Processing your request...",
+      text: "Processing your request...",
     };
 
     const newMessages = [...messages, userMessage, processingMessage];
@@ -139,6 +150,7 @@ export default function Home() {
         {
           role: "bot",
           content: "Please connect your wallet to perform this action.",
+          text: "Please connect your wallet to perform this action.",
         },
       ]);
       setIsLoading(false);
@@ -151,10 +163,7 @@ export default function Home() {
       // Extract text-only message history for API
       const messageHistory = messages.map((msg) => ({
         role: msg.role,
-        content:
-          typeof msg.content === "string"
-            ? msg.content
-            : "Content not available as string",
+        content: msg.text || (typeof msg.content === "string" ? msg.content : "Content not available"),
       }));
 
       // Process all requests through the AI endpoint
@@ -170,6 +179,10 @@ export default function Home() {
       });
 
       const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch AI response");
+      }
 
       console.log("AI response:", data);
 
@@ -188,6 +201,7 @@ export default function Home() {
               ...newMessages.slice(0, -1),
               {
                 role: "bot",
+                text: `Transaction initiated: ${transactionHash}`,
                 content: (
                   <a
                     href={`${BLOCK_EXPLORER_URL}${transactionHash}`}
@@ -212,6 +226,7 @@ export default function Home() {
               ...newMessages.slice(0, -1),
               {
                 role: "bot",
+                text: `Balance: ${balance.displayValue} ${balance.symbol}`,
                 content: (
                   <div className="w-full">
                     <div className="mt-2">
@@ -228,6 +243,7 @@ export default function Home() {
               ...newMessages.slice(0, -1),
               {
                 role: "bot",
+                text: data.analysis || "No information available.",
                 content: (
                   <div className="markdown-content space-y-4">
                     <ReactMarkdown>
@@ -245,6 +261,7 @@ export default function Home() {
           ...newMessages.slice(0, -1),
           {
             role: "bot",
+            text: data.analysis || "No information available.",
             content: (
               <div className="markdown-content space-y-4">
                 <ReactMarkdown>
@@ -260,6 +277,7 @@ export default function Home() {
         ...newMessages.slice(0, -1),
         {
           role: "bot",
+          text: `Error: ${error instanceof Error ? error.message : "Operation failed"}`,
           content: `Error: ${
             error instanceof Error ? error.message : "Operation failed"
           }`,

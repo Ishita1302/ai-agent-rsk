@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { Groq } from "groq-sdk";
-
-const groqClient = new Groq({
-  apiKey: process.env.GROQ_API_KEY as string,
-});
+import { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
+import { tools, toolsMap } from "@/lib/ai/tools";
 
 export async function POST(req: Request) {
+  const groqClient = new Groq({
+    apiKey: process.env.GROQ_API_KEY,
+  });
+
   try {
     const {
       type,
@@ -13,13 +15,19 @@ export async function POST(req: Request) {
       question,
       address,
       messageHistory = [],
-    } = await req.json();
+    } = (await req.json()) as {
+      type: string;
+      data: unknown;
+      question: string;
+      address: string;
+      messageHistory: { role: string; content: string }[];
+    };
 
     const prompt = createChatPrompt(data, question, address);
 
     const limitedHistory = messageHistory.slice(-10);
 
-    const messages = [
+    const messages: ChatCompletionMessageParam[] = [
       {
         role: "system",
         content: getSystemPrompt(),
@@ -27,10 +35,10 @@ export async function POST(req: Request) {
     ];
 
     if (limitedHistory && limitedHistory.length > 0) {
-      limitedHistory.forEach((msg: { role: string; content: string }) => {
+      limitedHistory.forEach((msg) => {
         messages.push({
           role: msg.role === "bot" ? "assistant" : "user",
-          content: typeof msg.content === "string" ? msg.content : "User input",
+          content: msg.content,
         });
       });
     }
@@ -40,93 +48,111 @@ export async function POST(req: Request) {
       content: prompt,
     });
 
-    const response = await groqClient.chat.completions.create({
-      model: "llama3-70b-8192",
-      max_tokens: 2024,
-      messages: messages as any,
-      temperature: 0.7,
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "transfer",
-            description:
-              "Transfer tokens from the user's wallet to another address",
-            parameters: {
-              type: "object",
-              properties: {
-                address: {
-                  type: "string",
-                  description: "Recipient wallet address",
-                },
-                token1: {
-                  type: "string",
-                  description:
-                    "Token symbol to transfer (e.g., TRBTC, DOC, RIF)",
-                },
-                amount: {
-                  type: "number",
-                  description: "Amount of tokens to transfer",
-                },
-              },
-              required: ["address", "token1", "amount"],
-            },
-          },
-        },
-        {
-          type: "function",
-          function: {
-            name: "balance",
-            description: "Check token balance for an address",
-            parameters: {
-              type: "object",
-              properties: {
-                address: {
-                  type: "string",
-                  description:
-                    "Wallet address to check (defaults to user's wallet if empty)",
-                },
-                token1: {
-                  type: "string",
-                  description:
-                    "Token symbol to check balance for (e.g., TRBTC, DOC, RIF)",
-                },
-              },
-              required: ["token1"],
-            },
-          },
-        },
-      ],
-      tool_choice: "auto",
-    });
+    let loopCount = 0;
+    const MAX_LOOPS = 5;
+    let toolExecuted = false;
 
-    const aiMessage = response.choices[0].message;
-    const toolCalls = aiMessage.tool_calls;
+    while (loopCount < MAX_LOOPS) {
+      const response = await groqClient.chat.completions.create({
+        model: "llama-3.3-70b-versatile",
+        max_tokens: 2024,
+        messages: messages,
+        temperature: 0.7,
+        tools: tools.map((t) => t.definition),
+        tool_choice: toolExecuted ? "none" : "auto",
+      });
 
-    // Handle function calls if present
-    if (toolCalls && toolCalls.length > 0) {
+      const aiMessage = response.choices[0].message;
+      const toolCalls = aiMessage.tool_calls;
+
+      // If no tool calls, return response
+      if (!toolCalls || toolCalls.length === 0) {
+        return NextResponse.json({
+          analysis: aiMessage.content,
+          type,
+        });
+      }
+
       const toolCall = toolCalls[0];
       const functionName = toolCall.function.name;
       const functionArgs = JSON.parse(toolCall.function.arguments);
+      const tool = toolsMap[functionName];
 
-      return NextResponse.json({
-        analysis: aiMessage.content || "Processing your request...",
-        type,
-        functionCall: {
-          name: functionName,
-          arguments: functionArgs,
-        },
-      });
+      if (!tool) {
+        console.error("Tool not found:", functionName);
+        return NextResponse.json({ error: "Tool not found" }, { status: 500 });
+      }
+
+      // Handle client-side tools (transfer, balance)
+      if (tool.type === "client") {
+        return NextResponse.json({
+          analysis: aiMessage.content || "Processing your request...",
+          type,
+          functionCall: {
+            name: functionName,
+            arguments: functionArgs,
+          },
+        });
+      }
+
+     
+      if (tool.type === "server" && tool.handler) {
+        console.log(`Executing server tool: ${functionName}`);
+
+       
+        messages.push({
+          role: "assistant",
+          content: aiMessage.content || "",
+          tool_calls: toolCalls,
+        });
+
+        try {
+          const result = await tool.handler(functionArgs);
+          
+       
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
+          });
+
+          
+          toolExecuted = true;
+          loopCount++; 
+        } catch (error) {
+          console.error(`Tool execution failed: ${functionName}`, error);
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify({ error: "Tool execution failed" }),
+          });
+          toolExecuted = true;
+          loopCount++;
+        }
+      } else {
+        return NextResponse.json(
+          { error: "Invalid tool configuration" },
+          { status: 500 }
+        );
+      }
     }
 
-    // Regular response without function calls
-    return NextResponse.json({
-      analysis: aiMessage.content,
-      type,
-    });
+    return NextResponse.json({ error: "Too many tool loops" }, { status: 500 });
   } catch (error) {
     console.error("AI Analysis Error:", error);
-    return NextResponse.json({ error: "Analysis failed" }, { status: 500 });
+    
+    
+    if (error instanceof Error && error.message.includes("Invalid API Key")) {
+      return NextResponse.json(
+        { error: "Invalid API Key. Please check your .env.local file." },
+        { status: 401 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: "Failed to process AI request" },
+      { status: 500 }
+    );
   }
 }
 
@@ -146,37 +172,37 @@ function getSystemPrompt() {
   - If portfolio is empty, briefly suggest 1-2 Rootstock options
   
   FORMATTING:
-  - Keep responses under 300 characters whenever possible
+  - Keep responses under 1000 characters when listing data
   - Use bold (**text**) for important terms
-  - No lists, no lengthy explanations
-  - One short greeting line, then 1-2 concise sentences for the answer
+  - Use bullet points to list transactions with: Date, Type (Sent/Received), Amount, and Counterparty
+  - Do NOT greet the user in every response unless it's the very first message
   
   CONTENT:
   - Rootstock testnet ecosystem: TRBTC (native), tRIF, tDOC, etc.
+  - For transactions: ALWAYS list the specific amounts and dates. DO NOT summarize as "varying values".
   - For transfers/balances: respond naturally without mentioning functions
   - For strategies: give only brief, specific insights
   
   BE EXTREMELY BRIEF. Your responses should be scannable in 5 seconds or less.`;
 }
 
-function createChatPrompt(userContext: any, question: string, address: string) {
+function createChatPrompt(userContext: unknown, question: string, address: string) {
+  const portfolioContext = userContext 
+    ? `My portfolio data: ${JSON.stringify(userContext, null, 2)} (amounts in wei, convert by dividing by 10e18).`
+    : "I have not provided portfolio data.";
+
   return `I need your help with the following DeFi request for my Rootstock testnet wallet (${address}):
   
   USER QUESTION: "${question}"
   
-  My portfolio data: ${JSON.stringify(
-    userContext,
-    null,
-    2
-  )} the amount is in wei so you need to convert it to the correct token amount by dividing by 10e18.
+  ${portfolioContext}
   
-  IMPORTANT: We are on the TESTNET environment. The native token is tRBTC (not RBTC). All tokens are testnet versions (tRBTC, tRIF, tDOC) with no real value.
+  IMPORTANT GUIDELINES:
+  1. We are on TESTNET. Native token is tRBTC.
+  2. If the user asks a general question (e.g., "what is trbtc?", "how does this work?"), ANSWER DIRECTLY. DO NOT call a tool.
+  3. Only use the 'balance' tool if the user explicitly asks for their balance or if it's required for a transaction.
+  4. Only use the 'get_recent_transactions' tool if the user asks for history, activity, or summary of transactions.
+  5. If the user asks to send/transfer, use the 'transfer' tool.
   
-  Please provide a helpful, personalized response that directly addresses my question. If I'm asking about sending tokens or checking balances, please handle that appropriately. If my portfolio is empty, don't just tell me I have no tokens - suggest what I could explore in the Rootstock testnet ecosystem.
-
-  When I ask to send RBTC, you should interpret this as tRBTC (testnet RBTC). Always use tRBTC in your function calls and responses.
-
-  If needed, you can USE FUNCTIONS like **transfer** or **balance** to help me with my request. WHENEVER ASKED TO SEND TOKENS, PLEASE USE THE **transfer** FUNCTION. WHENEVER ASKED TO CHECK BALANCES, PLEASE USE THE **balance** FUNCTION.
-  
-  Be conversational and friendly - like a professional financial advisor would be, not like a generic chatbot. Avoid technical language about functions or API calls - speak to me naturally about my options.`;
+  Please provide a helpful, personalized response.`;
 }
