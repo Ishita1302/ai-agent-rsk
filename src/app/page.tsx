@@ -17,7 +17,7 @@ import {
   sendTransaction,
   writeContract,
 } from "@wagmi/core";
-import { checksumAddress, erc20Abi, isAddress, parseEther } from "viem";
+import { checksumAddress, erc20Abi, formatEther, isAddress, parseEther } from "viem";
 import { findToken, isValidWalletAddress } from "@/lib/utils";
 import { BLOCK_EXPLORER_URL } from "@/lib/contants";
 
@@ -105,7 +105,7 @@ export default function Home() {
         });
 
         balance = {
-          displayValue: Number(queryBalance.value) / 10e18,
+          displayValue: Number(formatEther(queryBalance.value)),
           symbol: "tRBTC",
         };
       } else {
@@ -116,7 +116,7 @@ export default function Home() {
           args: [acc as `0x${string}`],
         });
         balance = {
-          displayValue: Number(queryBalance) / 10e18,
+          displayValue: Number(formatEther(queryBalance)),
 
           symbol: data.token1,
         };

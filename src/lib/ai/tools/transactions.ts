@@ -1,4 +1,19 @@
 import { Tool } from "../types";
+import { formatEther } from "viem";
+import { isValidWalletAddress } from "../../utils";
+
+interface TransactionItem {
+  hash: string;
+  from: { hash: string } | null;
+  to: { hash: string } | null;
+  value: string;
+  timestamp: string;
+  status: "ok" | "error";
+}
+
+interface BlockscoutResponse {
+  items: TransactionItem[];
+}
 
 export const recentTransactionsTool: Tool = {
   definition: {
@@ -23,13 +38,20 @@ export const recentTransactionsTool: Tool = {
     },
   },
   type: "server",
-  handler: async ({ address, limit = 5 }: { address: string; limit?: number }) => {
+  handler: async (args: Record<string, unknown>) => {
+    const address = args.address as string;
+    const limit = (args.limit as number) || 5;
+
     try {
       if (!address) {
         return { error: "Address is required" };
       }
 
-      
+      if (!isValidWalletAddress(address)) {
+        return { error: "Invalid address format" };
+      }
+
+      // Blockscout V2 API for Rootstock Testnet
       const response = await fetch(
         `https://rootstock-testnet.blockscout.com/api/v2/addresses/${address}/transactions`
       );
@@ -38,20 +60,20 @@ export const recentTransactionsTool: Tool = {
         throw new Error(`Blockscout API error: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as BlockscoutResponse;
       
       if (!data.items || !Array.isArray(data.items)) {
         return { message: "No recent transactions found for this address." };
       }
 
-      const transactions = data.items.slice(0, limit).map((tx: any) => {
-        const valueInTrbtc = (Number(tx.value) / 10e17).toFixed(6); // 10e17 = 10^18
+      const transactions = data.items.slice(0, limit).map((tx: TransactionItem) => {
+        const valueInTrbtc = formatEther(BigInt(tx.value));
         const date = new Date(tx.timestamp).toLocaleString();
         const type = tx.from?.hash?.toLowerCase() === address.toLowerCase() ? "Sent" : "Received";
         
         return {
           type,
-          amount: `${valueInTrbtc} TRBTC`,
+          amount: `${Number(valueInTrbtc).toFixed(6)} TRBTC`,
           date,
           from: tx.from?.hash || "Unknown",
           to: tx.to?.hash || "Contract Creation",

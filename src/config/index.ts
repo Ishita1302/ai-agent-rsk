@@ -1,4 +1,4 @@
-import { cookieStorage, createStorage, http } from 'wagmi'
+import { cookieStorage, createStorage, http, type Storage } from 'wagmi'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import type { AppKitNetwork } from '@reown/appkit/networks'
 import { rootstock, rootstockTestnet } from './chains'
@@ -20,7 +20,7 @@ export const wagmiAdapter = new WagmiAdapter({
     [rootstock.id]: http(), 
   },
   
-    storage: createStorage({ storage: cookieStorage }) as any,
+    storage: createStorage({ storage: cookieStorage }) as Storage,
   ssr: true,
   projectId,
   networks

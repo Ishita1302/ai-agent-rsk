@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import { Groq } from "groq-sdk";
 import { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
 import { tools, toolsMap } from "@/lib/ai/tools";
+import { z } from "zod";
+
+const requestSchema = z.object({
+  type: z.string(),
+  data: z.unknown(),
+  question: z.string(),
+  address: z.string(),
+  messageHistory: z.array(z.object({
+    role: z.string(),
+    content: z.string()
+  })).optional().default([])
+});
 
 export async function POST(req: Request) {
   const groqClient = new Groq({
@@ -9,19 +21,23 @@ export async function POST(req: Request) {
   });
 
   try {
+    const body = await req.json();
+    const validationResult = requestSchema.safeParse(body);
+
+    if (!validationResult.success) {
+      return NextResponse.json(
+        { error: "Invalid request body", details: validationResult.error.format() },
+        { status: 400 }
+      );
+    }
+
     const {
       type,
       data,
       question,
       address,
-      messageHistory = [],
-    } = (await req.json()) as {
-      type: string;
-      data: unknown;
-      question: string;
-      address: string;
-      messageHistory: { role: string; content: string }[];
-    };
+      messageHistory,
+    } = validationResult.data;
 
     const prompt = createChatPrompt(data, question, address);
 
@@ -75,7 +91,15 @@ export async function POST(req: Request) {
 
       const toolCall = toolCalls[0];
       const functionName = toolCall.function.name;
-      const functionArgs = JSON.parse(toolCall.function.arguments);
+      
+      let functionArgs;
+      try {
+        functionArgs = JSON.parse(toolCall.function.arguments);
+      } catch (error) {
+        console.error("Failed to parse tool arguments:", error);
+        return NextResponse.json({ error: "Invalid tool arguments received from AI" }, { status: 400 });
+      }
+
       const tool = toolsMap[functionName];
 
       if (!tool) {
