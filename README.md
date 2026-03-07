@@ -17,7 +17,19 @@ This project demonstrates how to build a lightweight conversational AI agent tha
 - 🧠 Natural language interface via Groq LLM API
 - 💬 Conversational agent with memory and action routing
 - ⚡ Send tRBTC and check token balances using plain English
-- 🖼️ UI powered by Next.js App Router and Shadcn components
+- �️ **Modular Tool System** — Extensible architecture for adding new AI skills.
+- 📊 **Transaction Summarization** — Automatically fetch and summarize wallet activity.
+- 🔬 **Smart Contract Interpretation** — Interpret and interact with Rootstock contracts.
+- �️ UI powered by Next.js App Router and Shadcn components
+
+## Community-Driven Extensions
+
+The Rootstock AI Agent is built on a collaborative, modular ecosystem. We foster innovation by allowing the community to contribute new "AI skills" or modules. Developers can easily extend the agent's capabilities to:
+- Summarize complex transactions.
+- Interpret and interact with smart contract data.
+- Integrate with additional Rootstock DeFi protocols.
+
+**Goal:** Foster innovation and expand the AI Agent into a collaborative, modular ecosystem that grows through community input.
 
 ## Prerequisites
 
@@ -74,8 +86,9 @@ Optional but recommended:
 - `app/page.tsx` — Main chat UI and wallet interface
 - `src/lib/utils.ts` — Wallet address validation and token lookup
 - `src/lib/constants.ts` — Block explorer URLs and other constants
+- `src/lib/ai/tools/` — Modular AI skill definitions (client and server-side)
 - `components/` — Reusable UI components and chat layout
-- `app/api/ai` — Endpoint to call Groq LLM API
+- `app/api/ai` — Endpoint to call Groq LLM API and handle modular tools
 
 ## Contributors
 
