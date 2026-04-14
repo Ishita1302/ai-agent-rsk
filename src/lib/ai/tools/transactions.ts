@@ -1,6 +1,7 @@
 import { Tool } from "../types";
 import { formatEther } from "viem";
 import { isValidWalletAddress } from "../../utils";
+import { z } from "zod";
 
 interface TransactionItem {
   hash: string;
@@ -15,7 +16,23 @@ interface BlockscoutResponse {
   items: TransactionItem[];
 }
 
+const argsSchema = z.object({
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+  limit: z.number().int().min(1).max(10).optional(),
+});
+
+const FETCH_TIMEOUT_MS = 10_000;
+
+function safeFormatEther(value: string | null | undefined): string {
+  try {
+    return formatEther(BigInt(value || "0"));
+  } catch {
+    return "0";
+  }
+}
+
 export const recentTransactionsTool: Tool = {
+  argsSchema,
   definition: {
     type: "function",
     function: {
@@ -39,8 +56,13 @@ export const recentTransactionsTool: Tool = {
   },
   type: "server",
   handler: async (args: Record<string, unknown>) => {
-    const address = args.address as string;
-    const limit = (args.limit as number) || 5;
+    const parsedArgs = argsSchema.safeParse(args);
+    if (!parsedArgs.success) {
+      return { error: "Invalid arguments for get_recent_transactions" };
+    }
+
+    const { address } = parsedArgs.data;
+    const limit = parsedArgs.data.limit ?? 5;
 
     try {
       if (!address) {
@@ -53,7 +75,8 @@ export const recentTransactionsTool: Tool = {
 
       // Blockscout V2 API for Rootstock Testnet
       const response = await fetch(
-        `https://rootstock-testnet.blockscout.com/api/v2/addresses/${address}/transactions`
+        `https://rootstock-testnet.blockscout.com/api/v2/addresses/${address}/transactions`,
+        { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
       );
       
       if (!response.ok) {
@@ -67,7 +90,7 @@ export const recentTransactionsTool: Tool = {
       }
 
       const transactions = data.items.slice(0, limit).map((tx: TransactionItem) => {
-        const valueInTrbtc = formatEther(BigInt(tx.value));
+        const valueInTrbtc = safeFormatEther(tx.value);
         const date = new Date(tx.timestamp).toLocaleString();
         const type = tx.from?.hash?.toLowerCase() === address.toLowerCase() ? "Sent" : "Received";
         

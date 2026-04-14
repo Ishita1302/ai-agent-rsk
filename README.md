@@ -31,6 +31,52 @@ The Rootstock AI Agent is built on a collaborative, modular ecosystem. We foster
 
 **Goal:** Foster innovation and expand the AI Agent into a collaborative, modular ecosystem that grows through community input.
 
+### Add a new plugin tool
+
+Server-side tool registration is manifest-driven. To add a community tool:
+
+1. Create your tool module in `src/lib/ai/tools/` and export a `Tool`.
+2. Define:
+   - `type: "server"` (or `"client"` for frontend-executed actions)
+   - `definition` (Groq function metadata)
+   - `argsSchema` (zod validation for all tool arguments)
+   - `handler` (required for server tools)
+3. Register it through a manifest in `src/lib/ai/tools/plugins/`.
+   - Add or update a `*.manifest.ts` file.
+   - Include the manifest in `src/lib/ai/tools/plugins/index.ts`.
+4. Run lint/type checks to ensure schema and type safety pass.
+
+Validation and safety rules:
+- Tool names must be unique across all manifests.
+- Server tools must provide a handler (compile-time and runtime validated).
+- Tool arguments are validated before execution.
+- Only enabled and allowlisted manifests are loaded.
+
+Minimal server tool example:
+
+```ts
+import { z } from "zod";
+import { Tool } from "../types";
+
+export const myTool: Tool = {
+  type: "server",
+  argsSchema: z.object({ address: z.string() }),
+  definition: {
+    type: "function",
+    function: {
+      name: "my_tool",
+      description: "Example tool",
+      parameters: {
+        type: "object",
+        properties: { address: { type: "string" } },
+        required: ["address"],
+      },
+    },
+  },
+  handler: async ({ address }) => ({ ok: true, address }),
+};
+```
+
 ## Prerequisites
 
 Make sure you have the following installed:

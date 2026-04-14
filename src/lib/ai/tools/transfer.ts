@@ -1,7 +1,13 @@
 import { Tool } from "../types";
+import { z } from "zod";
 
 export const transferTool: Tool = {
   type: 'client',
+  argsSchema: z.object({
+    address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Invalid wallet address"),
+    token1: z.string().min(1).max(20),
+    amount: z.union([z.string(), z.number()]),
+  }),
   definition: {
     type: "function",
     function: {

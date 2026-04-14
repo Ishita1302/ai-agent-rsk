@@ -22,8 +22,9 @@ import { findToken, isValidWalletAddress } from "@/lib/utils";
 import { BLOCK_EXPLORER_URL } from "@/lib/contants";
 
 export default function Home() {
+  type ChatRole = "user" | "bot" | "agent";
   const [messages, setMessages] = useState<
-    { role: string; content: React.ReactNode; text?: string }[]
+    { role: ChatRole; content: React.ReactNode; text?: string }[]
   >([
     {
       role: "agent",
@@ -47,7 +48,7 @@ export default function Home() {
   const handleTransfer = async (data: {
     token1: string;
     address: string;
-    amount: number;
+    amount: string | number;
   }) => {
     console.log("Data:", data);
     try {
@@ -57,19 +58,27 @@ export default function Home() {
           : await findToken(data.token1);
 
       if (!tokenAddress) throw new Error("Token not found");
+      const normalizedAmount = data.amount.toString().trim();
+      if (!normalizedAmount) {
+        throw new Error("Amount is required");
+      }
+      const parsedAmount = parseEther(normalizedAmount);
+      if (parsedAmount <= BigInt(0)) {
+        throw new Error("Amount must be greater than zero");
+      }
 
       let transactionHash: string;
       if (tokenAddress === "trbtc") {
         transactionHash = await sendTransaction(config, {
           to: data.address as `0x${string}`,
-          value: parseEther(data.amount.toString()),
+          value: parsedAmount,
         });
       } else {
         transactionHash = await writeContract(config, {
           abi: erc20Abi,
           address: tokenAddress as `0x${string}`,
           functionName: "transfer",
-          args: [data.address as `0x${string}`, BigInt(data.amount)],
+          args: [data.address as `0x${string}`, parsedAmount],
         });
       }
 
@@ -132,7 +141,11 @@ export default function Home() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    const userMessage = { role: "user", content: input, text: input };
+    const userMessage: { role: ChatRole; content: React.ReactNode; text?: string } = {
+      role: "user",
+      content: input,
+      text: input,
+    };
     setInput("");
     setIsLoading(true);
 
@@ -162,7 +175,7 @@ export default function Home() {
     try {
       // Extract text-only message history for API
       const messageHistory = messages.map((msg) => ({
-        role: msg.role,
+        role: msg.role === "agent" ? "assistant" : msg.role,
         content: msg.text || (typeof msg.content === "string" ? msg.content : "Content not available"),
       }));
 
